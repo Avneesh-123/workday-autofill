@@ -160,6 +160,21 @@ export function Options() {
         <label className="row">
           <input
             type="checkbox"
+            checked={settings.safeMode}
+            onChange={(e) => saveSettings({ safeMode: e.target.checked })}
+          />
+          <span>
+            <strong>Safe Mode</strong> — only fill plain text fields (name,
+            email, phone, address line, etc.). Skip dropdowns, country pickers,
+            radios, checkboxes, dates and file uploads. Enable this if Workday
+            shows &quot;Something went wrong&quot; during autofill on this
+            tenant (Netflix is a known offender). You can fill the skipped
+            fields manually in a few seconds.
+          </span>
+        </label>
+        <label className="row">
+          <input
+            type="checkbox"
             checked={settings.confirmBeforeSubmit}
             onChange={(e) => saveSettings({ confirmBeforeSubmit: e.target.checked })}
           />
@@ -172,6 +187,43 @@ export function Options() {
             onChange={(e) => saveSettings({ preservePrefilled: e.target.checked })}
           />
           Never overwrite fields that already have a value.
+        </label>
+        <label className="row">
+          <input
+            type="checkbox"
+            checked={settings.useVision}
+            onChange={(e) => saveSettings({ useVision: e.target.checked })}
+          />
+          <span>
+            <strong>Use AI vision</strong> — attach a screenshot of the visible
+            form so the model can see weird/blank labels and repeating-row
+            layouts. Requires a vision-capable model (gpt-4o, gpt-4o-mini,
+            claude-3.5-sonnet, gemini-1.5, etc.). Adds ~$0.001 per page on
+            gpt-4o-mini.
+          </span>
+        </label>
+        <label className="row">
+          <input
+            type="checkbox"
+            checked={settings.reviewLowConfidence}
+            onChange={(e) => saveSettings({ reviewLowConfidence: e.target.checked })}
+          />
+          <span>
+            <strong>Review low-confidence answers</strong> — before typing,
+            pause on fields where the AI is unsure (confidence below the
+            threshold) and ask you to confirm or edit each one.
+          </span>
+        </label>
+        <label>
+          Low-confidence threshold: {settings.reviewThreshold.toFixed(2)}
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={settings.reviewThreshold}
+            onChange={(e) => saveSettings({ reviewThreshold: Number(e.target.value) })}
+          />
         </label>
         <label className="row">
           <input
@@ -190,6 +242,37 @@ export function Options() {
             step={1}
             value={settings.batchSize}
             onChange={(e) => saveSettings({ batchSize: Number(e.target.value) })}
+          />
+        </label>
+        <label>
+          Pause after each field (ms) — raise if Workday shows &quot;Something went wrong&quot;
+          <input
+            type="number"
+            min={0}
+            max={5000}
+            step={20}
+            value={settings.fillPacingMs}
+            onChange={(e) =>
+              setSettings({ ...settings, fillPacingMs: Math.max(0, Number(e.target.value) || 0) })
+            }
+            onBlur={() => saveSettings({ fillPacingMs: settings.fillPacingMs })}
+          />
+        </label>
+        <label>
+          Wait for quiet DOM after each field (ms, 0 = off)
+          <input
+            type="number"
+            min={0}
+            max={5000}
+            step={20}
+            value={settings.settleAfterFillMs}
+            onChange={(e) =>
+              setSettings({
+                ...settings,
+                settleAfterFillMs: Math.max(0, Number(e.target.value) || 0),
+              })
+            }
+            onBlur={() => saveSettings({ settleAfterFillMs: settings.settleAfterFillMs })}
           />
         </label>
       </section>

@@ -12,9 +12,17 @@
 
 import { GROQ_DEFAULT_BASE } from "@/lib/types";
 
+export type ChatContentPart =
+  | { type: "text"; text: string }
+  | {
+      type: "image_url";
+      image_url: { url: string; detail?: "low" | "high" | "auto" };
+    };
+
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
-  content: string;
+  /** Plain string for text-only, or array of parts for multimodal (vision). */
+  content: string | ChatContentPart[];
 }
 
 export interface ChatOptions {
@@ -27,6 +35,18 @@ export interface ChatOptions {
   responseFormat?: "json_object" | "text";
   /** Max retries on 429 / 5xx. */
   retries?: number;
+}
+
+/**
+ * Models we know support image inputs via the OpenAI Chat Completions
+ * `image_url` content part. Used by the field-mapper to decide whether
+ * a screenshot is worth attaching.
+ */
+const VISION_MODEL_RX =
+  /^(gpt-4o|gpt-4\.1|gpt-4-turbo|chatgpt-4o|gpt-5|o1|o3|o4|claude-3(?:\.5|-5)?-sonnet|claude-3(?:\.5|-5)?-opus|claude-3-haiku|claude-sonnet-|claude-opus-|claude-haiku-|gemini-1\.5|gemini-2|gemini-pro-vision|llama-3\.2.*vision|llava)/i;
+
+export function isVisionCapableModel(model: string): boolean {
+  return VISION_MODEL_RX.test(model.trim());
 }
 
 export interface ChatResponse {

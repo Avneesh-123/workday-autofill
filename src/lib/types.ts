@@ -96,8 +96,16 @@ export interface ResumeProfile {
     noticePeriod?: string;
     referredBy?: string;
     howDidYouHear?: string;
-    /** "Were you previously employed at {Company}?" — defaults to No if unset. */
+    /** Netflix / many tenants: "Phone Device Type" dropdown — Mobile, Land Line, etc. */
+    phoneDeviceType?: string;
+    /** Optional override if Workday rejects your parsed phone format (E.164 recommended, e.g. +919876543210). */
+    phoneFormatted?: string;
     previouslyEmployedAtCompany?: boolean;
+    /**
+     * "Are you currently working for [Company] as a contractor/vendor/temp?" style questions.
+     * When omitted, heuristics default to "No".
+     */
+    currentlyContractorAtEmployer?: boolean | string;
   };
 }
 
@@ -121,6 +129,39 @@ export interface UserSettings {
   preservePrefilled: boolean;
   /** Maximum number of fields to map in a single AI batch. */
   batchSize: number;
+  /**
+   * Milliseconds to pause after each filled field. Higher values reduce
+   * Workday client crashes on heavy tenants (e.g. Netflix).
+   */
+  fillPacingMs: number;
+  /**
+   * After each fill, wait until the DOM is quiet for this many ms (0 to skip).
+   * Lets React finish before the next interaction.
+   */
+  settleAfterFillMs: number;
+  /**
+   * When true, only fill plain text inputs (text, email, tel, url, number,
+   * textarea). Skips combobox, multiselect, select, radio, checkbox, date
+   * and file — these are the field kinds that most often crash Workday's
+   * client app on heavy tenants like Netflix.
+   *
+   * Use this if "Something went wrong" keeps appearing during autofill.
+   */
+  safeMode: boolean;
+  /**
+   * When true AND the selected model supports images, attach a screenshot of
+   * the visible form to the field-mapping request. The vision model can then
+   * identify fields whose label is blank, weird, or only visible as an icon.
+   */
+  useVision: boolean;
+  /**
+   * When true, fields whose AI confidence is below `reviewThreshold` are
+   * surfaced in an interactive review panel for one-click approve/edit
+   * BEFORE they are typed into the form.
+   */
+  reviewLowConfidence: boolean;
+  /** 0..1. Default 0.6. Fields with confidence < this go to manual review. */
+  reviewThreshold: number;
 }
 
 export const DEFAULT_SETTINGS: UserSettings = {
@@ -130,6 +171,14 @@ export const DEFAULT_SETTINGS: UserSettings = {
   confirmBeforeSubmit: true,
   preservePrefilled: true,
   batchSize: 12,
+  fillPacingMs: 360,
+  settleAfterFillMs: 260,
+  safeMode: false,
+  // OFF by default — vision call adds 2-5s per step.
+  useVision: false,
+  // OFF by default — pausing for review feels slow on most flows.
+  reviewLowConfidence: false,
+  reviewThreshold: 0.6,
 };
 
 /** Groq offers a generous free tier (sign up at console.groq.com). */
@@ -164,6 +213,11 @@ export interface FieldOption {
 export interface DetectedField {
   /** Stable id we generate so we can refer back to it across messages. */
   id: string;
+  /**
+   * Workday wrapper `data-automation-id` (e.g. `formField-city`), when known.
+   * Used to re-query the DOM after React re-renders so we never hold stale nodes.
+   */
+  formFieldAutomationId?: string;
   label: string;
   ariaLabel?: string;
   placeholder?: string;
@@ -207,7 +261,15 @@ export interface MappedValue {
 export type RuntimeMessage =
   | { type: "PING" }
   | { type: "STRUCTURE_RESUME"; text: string; hints: ResumeHints }
-  | { type: "MAP_FIELDS"; fields: DetectedField[]; profile: ResumeProfile; stepName?: string }
+  | {
+      type: "MAP_FIELDS";
+      fields: DetectedField[];
+      profile: ResumeProfile;
+      stepName?: string;
+      /** Optional base64 PNG dataURL of the visible viewport for vision models. */
+      screenshot?: string;
+    }
+  | { type: "CAPTURE_SCREENSHOT" }
   | { type: "GET_PROFILE" }
   | { type: "SET_PROFILE"; profile: ResumeProfile }
   | { type: "GET_SETTINGS" }

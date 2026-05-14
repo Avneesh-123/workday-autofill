@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Workday Autofill - Demo Application Form</title>
+    <style>
+      :root {
+        --bg: #f4f5f7;
+        --card: #ffffff;
+        --text: #1d2733;
+        --muted: #6b7785;
+        --border: #d8dde3;
+        --blue: #0b66c2;
+        --blue-dk: #08589f;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      }
+      header {
+        background: #fff;
+        border-bottom: 1px solid var(--border);
+        padding: 16px 28px;
+      }
+      header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+      header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+      .wrap {
+        max-width: 880px;
+        margin: 24px auto 60px;
+        padding: 0 24px;
+      }
+      .steps {
+        display: flex;
+        gap: 32px;
+        margin: 8px 0 24px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .steps b { color: var(--blue); }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 24px 28px;
+        margin-bottom: 18px;
+      }
+      .card h2 {
+        margin: 0 0 14px;
+        font-size: 16px;
+        font-weight: 600;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px 18px;
+      }
+      .full { grid-column: 1 / -1; }
+      label {
+        display: flex;
+        flex-direction: column;
+        font-size: 13px;
+        color: var(--text);
+      }
+      .req::after { content: " *"; color: #d23f3f; }
+      input[type="text"],
+      input[type="email"],
+      input[type="tel"],
+      input[type="url"],
+      input[type="number"],
+      textarea,
+      select {
+        margin-top: 4px;
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        font: inherit;
+        color: inherit;
+        background: #fff;
+      }
+      textarea { min-height: 90px; resize: vertical; }
+      input:focus, textarea:focus, select:focus {
+        outline: none;
+        border-color: var(--blue);
+        box-shadow: 0 0 0 2px rgba(11,102,194,0.18);
+      }
+      .radios, .checks {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-top: 6px;
+      }
+      .radios label, .checks label {
+        flex-direction: row;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+      }
+      .row-cb { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+      .help { color: var(--muted); font-size: 12px; margin-top: 4px; }
+      .actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        margin-top: 20px;
+      }
+      button {
+        font: inherit;
+        cursor: pointer;
+        padding: 9px 18px;
+        border-radius: 18px;
+        border: 1px solid var(--blue);
+        background: var(--blue);
+        color: #fff;
+      }
+      button.ghost {
+        background: #fff;
+        color: var(--blue);
+      }
+      button:hover { background: var(--blue-dk); border-color: var(--blue-dk); color: #fff; }
+      button.ghost:hover { background: #f0f7ff; color: var(--blue); }
+      .submitted {
+        display: none;
+        margin-top: 18px;
+        padding: 12px 16px;
+        background: #e7f4ed;
+        border: 1px solid #b6d9c2;
+        color: #15662f;
+        border-radius: 6px;
+      }
+      pre {
+        background: #1d2733;
+        color: #e2e8f0;
+        padding: 14px 16px;
+        border-radius: 6px;
+        overflow: auto;
+        font-size: 12px;
+        line-height: 1.5;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Senior Software Engineer - Application</h1>
+      <p>Workday Autofill demo fixture - this page uses the same data-automation-id attributes Workday uses.</p>
+    </header>
+
+    <main class="wrap">
+      <div class="steps">
+        <span><b>My Information</b></span>
+        <span>My Experience</span>
+        <span>Application Questions</span>
+        <span>Review</span>
+      </div>
+
+      <form id="demo-form" novalidate>
+        <!-- Contact section -->
+        <section class="card" data-automation-id="formSection-contact">
+          <h2 data-automation-id="formSectionTitle">Contact Information</h2>
+          <div class="grid">
+            <div data-automation-id="formField-firstName">
+              <label>
+                <span class="req" data-automation-id="formLabel">First Name</span>
+                <input type="text" name="firstName" autocomplete="given-name" required />
+              </label>
+            </div>
+            <div data-automation-id="formField-lastName">
+              <label>
+                <span class="req" data-automation-id="formLabel">Last Name</span>
+                <input type="text" name="lastName" autocomplete="family-name" required />
+              </label>
+            </div>
+            <div data-automation-id="formField-email">
+              <label>
+                <span class="req" data-automation-id="formLabel">Email</span>
+                <input type="email" name="email" autocomplete="email" required />
+              </label>
+            </div>
+            <div data-automation-id="formField-phone">
+              <label>
+                <span class="req" data-automation-id="formLabel">Phone Number</span>
+                <input type="tel" name="phone" autocomplete="tel" required />
+              </label>
+            </div>
+
+            <div data-automation-id="formField-phoneDeviceType">
+              <label>
+                <span data-automation-id="formLabel">Phone Device Type</span>
+                <select name="phoneDeviceType">
+                  <option value="">Select...</option>
+                  <option>Mobile</option>
+                  <option>Land Line</option>
+                  <option>Fax</option>
+                </select>
+              </label>
+            </div>
+            <div data-automation-id="formField-countryPhoneCode">
+              <label>
+                <span data-automation-id="formLabel">Country Phone Code</span>
+                <select name="countryPhoneCode">
+                  <option value="">Select...</option>
+                  <option>India (+91)</option>
+                  <option>United States of America (+1)</option>
+                  <option>United Kingdom (+44)</option>
+                  <option>Germany (+49)</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="full" data-automation-id="formField-addressLine1">
+              <label>
+                <span data-automation-id="formLabel">Address Line 1</span>
+                <input type="text" name="addressLine1" autocomplete="address-line1" />
+              </label>
+            </div>
+            <div data-automation-id="formField-city">
+              <label>
+                <span data-automation-id="formLabel">City</span>
+                <input type="text" name="city" autocomplete="address-level2" />
+              </label>
+            </div>
+            <div data-automation-id="formField-state">
+              <label>
+                <span data-automation-id="formLabel">State / Province</span>
+                <input type="text" name="state" autocomplete="address-level1" />
+              </label>
+            </div>
+            <div data-automation-id="formField-postalCode">
+              <label>
+                <span data-automation-id="formLabel">Postal Code</span>
+                <input type="text" name="postalCode" autocomplete="postal-code" />
+              </label>
+            </div>
+            <div data-automation-id="formField-country">
+              <label>
+                <span data-automation-id="formLabel">Country</span>
+                <select name="country">
+                  <option value="">Select...</option>
+                  <option>India</option>
+                  <option>United States of America</option>
+                  <option>United Kingdom</option>
+                  <option>Germany</option>
+                  <option>Canada</option>
+                </select>
+              </label>
+            </div>
+
+            <div data-automation-id="formField-linkedin">
+              <label>
+                <span data-automation-id="formLabel">LinkedIn URL</span>
+                <input type="url" name="linkedin" autocomplete="url" />
+              </label>
+            </div>
+            <div data-automation-id="formField-github">
+              <label>
+                <span data-automation-id="formLabel">GitHub URL</span>
+                <input type="url" name="github" />
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <!-- Experience section -->
+        <section class="card" data-automation-id="formSection-experience">
+          <h2 data-automation-id="formSectionTitle">Most Recent Experience</h2>
+          <div class="grid">
+            <div data-automation-id="formField-company">
+              <label>
+                <span data-automation-id="formLabel">Company</span>
+                <input type="text" name="company" autocomplete="organization" />
+              </label>
+            </div>
+            <div data-automation-id="formField-jobTitle">
+              <label>
+                <span data-automation-id="formLabel">Job Title</span>
+                <input type="text" name="jobTitle" autocomplete="organization-title" />
+              </label>
+            </div>
+            <div data-automation-id="formField-startDate">
+              <label>
+                <span data-automation-id="formLabel">Start Date (MM/YYYY)</span>
+                <input type="text" name="startDate" placeholder="MM/YYYY" />
+              </label>
+            </div>
+            <div data-automation-id="formField-endDate">
+              <label>
+                <span data-automation-id="formLabel">End Date (MM/YYYY or Present)</span>
+                <input type="text" name="endDate" placeholder="MM/YYYY" />
+              </label>
+            </div>
+            <div class="full" data-automation-id="formField-jobSummary">
+              <label>
+                <span data-automation-id="formLabel">Summary of Responsibilities</span>
+                <textarea name="jobSummary"></textarea>
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <!-- Education -->
+        <section class="card" data-automation-id="formSection-education">
+          <h2 data-automation-id="formSectionTitle">Education</h2>
+          <div class="grid">
+            <div data-automation-id="formField-school">
+              <label>
+                <span data-automation-id="formLabel">School / University</span>
+                <input type="text" name="school" />
+              </label>
+            </div>
+            <div data-automation-id="formField-degree">
+              <label>
+                <span data-automation-id="formLabel">Degree</span>
+                <input type="text" name="degree" />
+              </label>
+            </div>
+            <div class="full" data-automation-id="formField-fieldOfStudy">
+              <label>
+                <span data-automation-id="formLabel">Field of Study</span>
+                <input type="text" name="fieldOfStudy" />
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <!-- Application questions -->
+        <section class="card" data-automation-id="formSection-questions">
+          <h2 data-automation-id="formSectionTitle">Application Questions</h2>
+
+          <div data-automation-id="formField-authorizedToWork">
+            <p data-automation-id="formLabel"><span class="req">Are you authorized to work in the country of the position?</span></p>
+            <div class="radios">
+              <label><input type="radio" name="authorizedToWork" value="Yes" /> Yes</label>
+              <label><input type="radio" name="authorizedToWork" value="No" /> No</label>
+            </div>
+          </div>
+
+          <div data-automation-id="formField-requiresSponsorship" style="margin-top:14px">
+            <p data-automation-id="formLabel"><span class="req">Will you now or in the future require sponsorship for employment visa status?</span></p>
+            <div class="radios">
+              <label><input type="radio" name="requiresSponsorship" value="Yes" /> Yes</label>
+              <label><input type="radio" name="requiresSponsorship" value="No" /> No</label>
+            </div>
+          </div>
+
+          <div data-automation-id="formField-willingToRelocate" style="margin-top:14px">
+            <label class="row-cb">
+              <input type="checkbox" name="willingToRelocate" />
+              <span data-automation-id="formLabel">I am willing to relocate for this role.</span>
+            </label>
+          </div>
+
+          <div data-automation-id="formField-howDidYouHear" style="margin-top:14px">
+            <label>
+              <span data-automation-id="formLabel">How did you hear about us?</span>
+              <select name="howDidYouHear">
+                <option value="">Select...</option>
+                <option>LinkedIn</option>
+                <option>Company Website</option>
+                <option>Referral</option>
+                <option>Job Board</option>
+                <option>Other</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="full" data-automation-id="formField-whyInterested" style="margin-top:14px">
+            <label>
+              <span data-automation-id="formLabel">Why are you interested in this role?</span>
+              <textarea name="whyInterested" rows="4"></textarea>
+            </label>
+          </div>
+        </section>
+
+        <div class="actions">
+          <button type="button" class="ghost" id="reset-btn">Clear Form</button>
+          <button type="submit">Save and Continue</button>
+        </div>
+
+        <div class="submitted" id="submitted-banner">
+          <strong>Form submitted!</strong> Here is the data Workday would receive:
+          <pre id="submitted-json"></pre>
+        </div>
+      </form>
+    </main>
+
+    <script>
+      const form = document.getElementById("demo-form");
+      const banner = document.getElementById("submitted-banner");
+      const out = document.getElementById("submitted-json");
+
+      form.addEventListener("submit", (e) => {
+        e.preventDefault();
+        const data = Object.fromEntries(new FormData(form).entries());
+        const checks = Array.from(form.querySelectorAll('input[type="checkbox"]'));
+        checks.forEach((cb) => (data[cb.name] = cb.checked));
+        out.textContent = JSON.stringify(data, null, 2);
+        banner.style.display = "block";
+        banner.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+
+      document.getElementById("reset-btn").addEventListener("click", () => {
+        form.reset();
+        banner.style.display = "none";
+      });
+    </script>
+  </body>
+</html>

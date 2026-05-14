@@ -5,6 +5,10 @@ import path from "node:path";
 import manifest from "./manifest.config";
 
 export default defineConfig({
+  // Extension popups live at chrome-extension://<id>/src/popup/index.html.
+  // Absolute "/assets/..." URLs fail to load there → blank dark popup (CSS
+  // sometimes still applies). Relative paths are required.
+  base: "./",
   plugins: [react(), crx({ manifest })],
   resolve: {
     alias: {

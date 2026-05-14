@@ -31,6 +31,13 @@ export function text(el: Element | null | undefined): string {
  * Dispatch a "native" input event in a way that React picks up.
  * Works for <input>, <textarea>, contenteditable elements.
  */
+/**
+ * Minimal value-set used by react-testing-library: bypass React's tracker
+ * via the prototype setter, then fire ONE `input` event. Workday's internal
+ * listeners reliably accept this; richer event sequences (InputEvent +
+ * change + focus + blur) have been observed to throw deep inside Workday's
+ * React tree and trip the "Something went wrong" error boundary.
+ */
 export function setNativeValue(
   el: HTMLInputElement | HTMLTextAreaElement,
   value: string,
@@ -46,7 +53,6 @@ export function setNativeValue(
     el.value = value;
   }
   el.dispatchEvent(new Event("input", { bubbles: true }));
-  el.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
 /**
@@ -73,6 +79,29 @@ export function realClick(el: HTMLElement): void {
   el.dispatchEvent(new MouseEvent("mousedown", opts));
   el.dispatchEvent(new MouseEvent("mouseup", opts));
   el.dispatchEvent(new MouseEvent("click", opts));
+}
+
+/**
+ * Close Workday popups without `document.body.click()` — that can activate
+ * whatever sits under the cursor (links, submit, another control) and has
+ * been observed to trip Workday into "Something went wrong".
+ */
+export async function dismissWorkdayOverlays(): Promise<void> {
+  const fire = (type: "keydown" | "keyup") => {
+    const init: KeyboardEventInit = {
+      key: "Escape",
+      code: "Escape",
+      bubbles: true,
+      cancelable: true,
+    };
+    const t = document.activeElement;
+    if (t instanceof HTMLElement) t.dispatchEvent(new KeyboardEvent(type, init));
+    document.body.dispatchEvent(new KeyboardEvent(type, init));
+  };
+  fire("keydown");
+  await sleep(35);
+  fire("keyup");
+  await sleep(80);
 }
 
 /**

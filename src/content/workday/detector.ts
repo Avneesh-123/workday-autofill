@@ -13,6 +13,47 @@
 import { DetectedField, FieldKind, FieldOption } from "@/lib/types";
 import { isVisible, stableId, text } from "@/content/workday/dom-utils";
 
+/** Workday's stable wrapper id, e.g. `formField-givenName` or `formField-addressLine1$47281`. */
+function workdayAnchor(wrapper: HTMLElement): string | undefined {
+  const a = wrapper.getAttribute("data-automation-id");
+  return a && /^formField/i.test(a) ? a : undefined;
+}
+
+/**
+ * Deterministic field id + anchor so we can re-query the DOM after React
+ * re-renders (stale HTMLElement pointers were crashing Netflix / Workday).
+ */
+function shell(
+  wrapper: HTMLElement,
+  kind: FieldKind,
+  tag = "",
+): Pick<DetectedField, "id" | "formFieldAutomationId"> {
+  const anchor = workdayAnchor(wrapper);
+  const id = anchor ? `${anchor}__${kind}${tag ? `__${tag}` : ""}` : stableId(kind);
+  return { id, formFieldAutomationId: anchor };
+}
+
+/** True if this wrapper is a dropdown we intentionally do not autofill. */
+function wrapperContainsSkippedDropdown(wrapper: HTMLElement): boolean {
+  return (
+    !!wrapper.querySelector<HTMLSelectElement>("select") ||
+    !!wrapper.querySelector<HTMLElement>(
+      '[role="combobox"], [data-automation-id="multiselectInputContainer"], button[aria-haspopup="listbox"], button[aria-haspopup="true"]',
+    )
+  );
+}
+
+/** Prevent loose-input detection from grabbing combobox inner inputs. */
+function markFormControlsInsideSeen(wrapper: HTMLElement, seen: Set<Element>): void {
+  wrapper
+    .querySelectorAll<HTMLElement>(
+      'input:not([type=hidden]):not([type=submit]):not([type=button]), select, textarea',
+    )
+    .forEach((el) => {
+      seen.add(el);
+    });
+}
+
 export interface DetectionResult {
   fields: DetectedField[];
   registry: Map<string, HTMLElement>;
@@ -36,14 +77,34 @@ export function detectFields(root: ParentNode = document): DetectionResult {
   );
 
   const seen = new Set<Element>();
+  // Some Workday tenants (Netflix) emit the SAME `data-automation-id` on
+  // every repeated row of Work Experience / Education without a unique
+  // suffix. `shell()` would then generate identical ids for every row,
+  // collapsing the registry to a single element. We disambiguate by
+  // appending a per-id occurrence counter so row 1's "Job Title" gets
+  // a distinct id from row 0's.
+  const idOccurrences = new Map<string, number>();
 
   for (const wrapper of wrappers) {
     if (!isVisible(wrapper)) continue;
     const detected = detectInsideWrapper(wrapper, stepName);
     for (const d of detected) {
+      const baseId = d.field.id;
+      const n = idOccurrences.get(baseId) ?? 0;
+      idOccurrences.set(baseId, n + 1);
+      if (n > 0) {
+        d.field.id = `${baseId}__row${n}`;
+      }
       registry.set(d.field.id, d.element);
       fields.push(d.field);
       seen.add(d.element);
+      // For combobox / multiselect / <select>, the wrapper may also contain
+      // a search <input> that would otherwise be picked up as a plain text
+      // field by the loose-input pass below. Mark every form control inside
+      // the wrapper as seen so the dropdown is detected once, as a dropdown.
+      if (d.field.kind === "combobox" || d.field.kind === "multiselect" || d.field.kind === "select") {
+        markFormControlsInsideSeen(wrapper, seen);
+      }
     }
   }
 
@@ -61,9 +122,162 @@ export function detectFields(root: ParentNode = document): DetectionResult {
     fields.push(detected.field);
   }
 
-  // Detect "Add Another" repeatable sections so the navigator can
-  // expand them before mapping.
+  // Annotate repeatable fields with their row index. Workday repeats sections
+  // like Work Experience / Education with `data-automation-id` suffixes such
+  // as `formField-jobTitle$48721`. All fields in the same row share the same
+  // `$NNN` suffix. We assign repeatIndex by the row's first DOM-appearance.
+  annotateRepeatableRows(fields, registry);
+
   return { fields, registry, stepName };
+}
+
+function annotateRepeatableRows(
+  fields: DetectedField[],
+  registry: Map<string, HTMLElement>,
+): void {
+  // Workday tenants vary in how they tag repeat-row fields:
+  //   - Some use `formField-jobTitle$48721` (dollar + numeric suffix).
+  //   - Netflix often uses unsuffixed `formField-jobTitle` per row, distinguished
+  //     only by DOM position.
+  // Strategy: classify each DetectedField by its semantic "kind" (jobTitle,
+  // company, from, to, school, degree, ...), group same-kind fields, sort by
+  // DOM y-position, and assign repeatIndex by that order.
+  //
+  // This works regardless of whether the automation IDs are suffixed.
+  type Kind =
+    | "exp-title"
+    | "exp-company"
+    | "exp-location"
+    | "exp-from"
+    | "exp-to"
+    | "exp-current"
+    | "exp-summary"
+    | "edu-school"
+    | "edu-degree"
+    | "edu-field"
+    | "edu-from"
+    | "edu-to"
+    | "lang-name"
+    | "lang-prof";
+  type Section = "experience" | "education" | "language";
+
+  function pickKind(f: DetectedField): { kind: Kind; section: Section } | null {
+    const aid = (f.formFieldAutomationId ?? "")
+      .replace(/^formField-?/, "")
+      .replace(/\$.*$/, "")
+      .toLowerCase();
+    const lbl = `${f.label} ${f.ariaLabel ?? ""} ${f.placeholder ?? ""}`.toLowerCase();
+    const hay = `${aid} ${lbl}`;
+    const section = (f.section ?? "").toLowerCase();
+    const inEdu = /educat|school|university|college|academic|qualification|degree/.test(section);
+    const inLang =
+      /language|languages|locale|fluency|proficiency|lingua|bilingual/i.test(section) ||
+      /\b(languages?|fluency|proficiency)\b/i.test(lbl);
+
+    // Classify Writing / Reading / … as `lang-prof` BEFORE generic "language name",
+    // otherwise every column becomes `lang-name` and repeatIndex is wrong.
+    if (inLang || /^language(name)?$/i.test(aid) || /\blanguage\b/.test(hay)) {
+      if (
+        /\b(writing|reading|speaking|comprehension|overall|listening|oral|verbal|interaction|punctuation)\b/i.test(
+          hay,
+        )
+      ) {
+        return { kind: "lang-prof", section: "language" };
+      }
+      return { kind: "lang-name", section: "language" };
+    }
+    if (/\bproficien|fluency\b/.test(hay) && !/\b(how|what|which)\b/.test(hay))
+      return { kind: "lang-prof", section: "language" };
+
+    if (inEdu || /\bschool|university|institution|college\b/.test(hay))
+      return { kind: "edu-school", section: "education" };
+    if (inEdu && /\bdegree\b/.test(hay)) return { kind: "edu-degree", section: "education" };
+    if (/\bdegree\b/.test(hay)) return { kind: "edu-degree", section: "education" };
+    if (/\bfield\s*of\s*study|major|discipline\b/.test(hay))
+      return { kind: "edu-field", section: "education" };
+
+    if (/\bjob\s*title|jobtitle|position|role|^title$/.test(hay) && !/\bcert/.test(hay))
+      return { kind: "exp-title", section: inEdu ? "education" : "experience" };
+    if (/\bcompany|employer|organization\b/.test(hay))
+      return { kind: "exp-company", section: "experience" };
+    if (/\b(location|city)\b/.test(hay) && !/\bcountry\b/.test(hay))
+      return { kind: "exp-location", section: "experience" };
+    if (/\b(currently\s*work|currentlywork)\b/.test(hay))
+      return { kind: "exp-current", section: "experience" };
+    if (/\b(summary|responsibilit|description|highlight)\b/.test(hay))
+      return { kind: "exp-summary", section: "experience" };
+
+    // "From" / "To" are ambiguous (could be education OR experience). Route by
+    // the section heading; experience is the default.
+    if (/\b(from|start\s*date|start)\b/.test(hay) && !/\b(country|state|city)\b/.test(hay)) {
+      return { kind: inEdu ? "edu-from" : "exp-from", section: inEdu ? "education" : "experience" };
+    }
+    if (/\b(to|end\s*date|through|until)\b/.test(hay) && !/\b(country|state|city)\b/.test(hay)) {
+      return { kind: inEdu ? "edu-to" : "exp-to", section: inEdu ? "education" : "experience" };
+    }
+
+    return null;
+  }
+
+  // Group fields by kind. We also exclude obviously single-occurrence cases
+  // (header "Job Title" search box, etc.) by requiring repeatable kinds to
+  // appear at least once — annotation is harmless even for a single row.
+  const byKind = new Map<Kind, { field: DetectedField; section: Section; pos: number }[]>();
+  for (const f of fields) {
+    if (f.kind === "file") continue;
+    const k = pickKind(f);
+    if (!k) continue;
+    const el = registry.get(f.id);
+    const rect = el?.getBoundingClientRect();
+    const pos = rect ? rect.top + window.scrollY : 0;
+    if (!byKind.has(k.kind)) byKind.set(k.kind, []);
+    byKind.get(k.kind)!.push({ field: f, section: k.section, pos });
+  }
+
+  for (const [, entries] of byKind) {
+    entries.sort((a, b) => a.pos - b.pos);
+    entries.forEach((e, idx) => {
+      e.field.repeatable = true;
+      e.field.repeatIndex = idx;
+      // Override section so the heuristic rules dispatch correctly.
+      e.field.section =
+        e.section === "education"
+          ? "Education"
+          : e.section === "language"
+            ? "Languages"
+            : "Work Experience";
+    });
+  }
+
+  rebucketLanguageRepeatIndexes(fields, registry);
+}
+
+/** One repeatIndex per language *row* (name + Writing/Reading/… share the same index). */
+function rebucketLanguageRepeatIndexes(
+  fields: DetectedField[],
+  registry: Map<string, HTMLElement>,
+): void {
+  const langFs = fields.filter(
+    (f) =>
+      /language|languages|fluency|proficiency/i.test(f.section ?? "") ||
+      /\b(writing|reading|speaking|comprehension|overall)\b/i.test(f.label),
+  );
+  if (langFs.length === 0) return;
+  const withPos = langFs
+    .map((f) => ({
+      f,
+      top: registry.get(f.id)?.getBoundingClientRect().top ?? 0,
+    }))
+    .sort((a, b) => a.top - b.top);
+  let row = -1;
+  let anchorTop = Number.NEGATIVE_INFINITY;
+  for (const { f, top } of withPos) {
+    if (row < 0 || top - anchorTop > 72) {
+      row++;
+      anchorTop = top;
+    }
+    f.repeatIndex = row;
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -113,14 +327,11 @@ function detectInsideWrapper(
   const required = isRequired(wrapper);
 
   if (dateWrapper) {
-    // We expose the wrapper itself; the filler knows how to fill the
-    // three sub-inputs.
-    const id = stableId("date");
     return [
       {
         element: dateWrapper,
         field: {
-          id,
+          ...shell(wrapper, "date"),
           label,
           helpText,
           required,
@@ -134,12 +345,11 @@ function detectInsideWrapper(
   }
 
   if (fileInput) {
-    const id = stableId("file");
     return [
       {
         element: fileInput,
         field: {
-          id,
+          ...shell(wrapper, "file"),
           label,
           helpText,
           required,
@@ -152,7 +362,6 @@ function detectInsideWrapper(
   }
 
   if (radios.length > 0) {
-    const id = stableId("radio");
     const options: FieldOption[] = radios.map((r) => ({
       value: r.value || readRadioLabel(r),
       label: readRadioLabel(r),
@@ -162,7 +371,7 @@ function detectInsideWrapper(
       {
         element: radios[0],
         field: {
-          id,
+          ...shell(wrapper, "radio"),
           label,
           helpText,
           required,
@@ -177,7 +386,6 @@ function detectInsideWrapper(
   }
 
   if (checkboxes.length > 1) {
-    const id = stableId("ckg");
     const options: FieldOption[] = checkboxes.map((c) => ({
       value: c.value || readRadioLabel(c),
       label: readRadioLabel(c),
@@ -187,7 +395,7 @@ function detectInsideWrapper(
       {
         element: checkboxes[0],
         field: {
-          id,
+          ...shell(wrapper, "checkbox", "group"),
           label,
           helpText,
           required,
@@ -203,12 +411,11 @@ function detectInsideWrapper(
 
   if (checkboxes.length === 1) {
     const cb = checkboxes[0];
-    const id = stableId("ck");
     return [
       {
         element: cb,
         field: {
-          id,
+          ...shell(wrapper, "checkbox"),
           label,
           helpText,
           required,
@@ -222,7 +429,6 @@ function detectInsideWrapper(
   }
 
   if (selectEl) {
-    const id = stableId("sel");
     const options = Array.from(selectEl.options).map<FieldOption>((o) => ({
       value: o.value,
       label: o.text,
@@ -231,7 +437,7 @@ function detectInsideWrapper(
       {
         element: selectEl,
         field: {
-          id,
+          ...shell(wrapper, "select"),
           label,
           helpText,
           required,
@@ -246,19 +452,19 @@ function detectInsideWrapper(
   }
 
   if (combobox) {
-    const id = stableId("cb");
     const isMulti =
       combobox.getAttribute("aria-multiselectable") === "true" ||
       !!wrapper.querySelector('[data-automation-id="multiselectInputContainer"]');
+    const kind: FieldKind = isMulti ? "multiselect" : "combobox";
     return [
       {
         element: combobox,
         field: {
-          id,
+          ...shell(wrapper, kind),
           label,
           helpText,
           required,
-          kind: isMulti ? "multiselect" : "combobox",
+          kind,
           section: sectionName,
           selector: '[role="combobox"]',
           currentValue: readComboboxValue(combobox, wrapper) ?? undefined,
@@ -268,18 +474,18 @@ function detectInsideWrapper(
   }
 
   if (textInput) {
-    const id = stableId("inp");
+    const kind = classifyInput(textInput);
     return [
       {
         element: textInput,
         field: {
-          id,
+          ...shell(wrapper, kind),
           label,
           ariaLabel: textInput.getAttribute("aria-label") ?? undefined,
           placeholder: textInput.getAttribute("placeholder") ?? undefined,
           helpText,
           required,
-          kind: classifyInput(textInput),
+          kind,
           section: sectionName,
           selector: textInput.tagName.toLowerCase(),
           currentValue: textInput.value,
@@ -302,12 +508,17 @@ function describeBareInput(
     "";
   if (!label) return null;
 
+  const wrap = el.closest<HTMLElement>(
+    '[data-automation-id^="formField-"], [data-automation-id="formField"]',
+  );
+  if (wrap && wrapperContainsSkippedDropdown(wrap)) return null;
+
   if (el instanceof HTMLInputElement) {
     if (el.type === "checkbox") {
       return {
         element: el,
         field: {
-          id: stableId("ck"),
+          ...(wrap ? shell(wrap, "checkbox") : { id: stableId("ck"), formFieldAutomationId: undefined }),
           label,
           required: el.required,
           kind: "checkbox",
@@ -321,7 +532,7 @@ function describeBareInput(
     return {
       element: el,
       field: {
-        id: stableId("inp"),
+        ...(wrap ? shell(wrap, classifyInput(el)) : { id: stableId("inp"), formFieldAutomationId: undefined }),
         label,
         required: el.required,
         kind: classifyInput(el),
@@ -335,7 +546,7 @@ function describeBareInput(
     return {
       element: el,
       field: {
-        id: stableId("ta"),
+        ...(wrap ? shell(wrap, "textarea") : { id: stableId("ta"), formFieldAutomationId: undefined }),
         label,
         required: el.required,
         kind: "textarea",
@@ -346,19 +557,8 @@ function describeBareInput(
     };
   }
   if (el instanceof HTMLSelectElement) {
-    return {
-      element: el,
-      field: {
-        id: stableId("sel"),
-        label,
-        required: el.required,
-        kind: "select",
-        options: Array.from(el.options).map((o) => ({ value: o.value, label: o.text })),
-        section: stepName,
-        selector: "select",
-        currentValue: el.value,
-      },
-    };
+    // Skip native <select> as well — dropdowns are intentionally unhandled.
+    return null;
   }
   return null;
 }
@@ -451,20 +651,19 @@ function readDateValue(wrapper: HTMLElement): string {
 }
 
 function readComboboxValue(
-  combobox: HTMLElement,
+  _combobox: HTMLElement,
   wrapper: HTMLElement,
 ): string | null {
+  // Only treat the field as "filled" when there is a committed selection
+  // pill. Otherwise visible text in a search input is uncommitted and we
+  // would incorrectly skip the field with "preservePrefilled".
   const selectedPill = wrapper.querySelector<HTMLElement>(
     '[data-automation-id="selectedItem"], [data-automation-id="DELETE_TAG"]',
   );
-  if (selectedPill) return text(selectedPill);
-  const fromAria = combobox.getAttribute("aria-activedescendant");
-  if (fromAria) {
-    const labelled = document.getElementById(fromAria);
-    if (labelled) return text(labelled);
+  if (selectedPill) {
+    const t = text(selectedPill);
+    if (t) return t;
   }
-  const inner = text(combobox);
-  if (inner && !/select one/i.test(inner)) return inner;
   return null;
 }
 

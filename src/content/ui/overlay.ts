@@ -14,6 +14,12 @@ export interface OverlayHandle {
     items: ReviewItem[],
     actions: { onConfirm: () => void; onCancel: () => void; onRetryField: (id: string) => void },
   ) => void;
+  /**
+   * Pause before filling and let the user approve / edit AI answers that fell
+   * below the confidence threshold. Resolves with the (possibly edited) values.
+   * Items the user skipped have their value cleared to `null`.
+   */
+  reviewBeforeFill: (items: PreFillItem[]) => Promise<MappedValue[]>;
   appendLog: (msg: string) => void;
   destroy: () => void;
 }
@@ -23,6 +29,16 @@ export interface ReviewItem {
   answer: MappedValue;
   status: "filled" | "skipped" | "error";
   message?: string;
+}
+
+export interface PreFillItem {
+  field: DetectedField;
+  answer: MappedValue;
+}
+
+export interface MountOverlayOptions {
+  /** Called when user clicks Stop or × — must halt the autofill loop. */
+  onUserStop?: () => void;
 }
 
 const STYLE_ID = "wda-overlay-style";
@@ -51,6 +67,14 @@ const CSS = `
   background: linear-gradient(135deg, #4f46e5, #7c3aed);
   display: flex; align-items: center; justify-content: space-between;
   font-weight: 600;
+}
+#${OVERLAY_ID} .wda-h-actions {
+  display: flex; align-items: center; gap: 8px;
+}
+#${OVERLAY_ID} .wda-stop {
+  background: #7f1d1d; color: #fecaca; border: 1px solid #fca5a5;
+  border-radius: 6px; padding: 4px 10px; font-size: 11px; font-weight: 700;
+  cursor: pointer;
 }
 #${OVERLAY_ID} .wda-h button {
   background: transparent; border: 0; color: #fff; cursor: pointer;
@@ -101,9 +125,58 @@ const CSS = `
 #${OVERLAY_ID} .wda-pill.skip { background: #1e293b; color: #94a3b8; }
 #${OVERLAY_ID} .wda-pill.err { background: #450a0a; color: #fca5a5; }
 #${OVERLAY_ID} .wda-pill.warn { background: #422006; color: #fcd34d; }
+
+/* Pre-fill review panel (low-confidence answers). */
+#${OVERLAY_ID} .wda-prefill { display: none; padding: 4px 0 8px; }
+#${OVERLAY_ID} .wda-prefill h3 {
+  margin: 0 0 8px; font-size: 13px; color: #fde68a;
+}
+#${OVERLAY_ID} .wda-prefill .wda-sub {
+  font-size: 11px; color: #94a3b8; margin-bottom: 8px;
+}
+#${OVERLAY_ID} .wda-pf-item {
+  background: #0b1224; border: 1px solid #1e293b; border-radius: 8px;
+  padding: 8px 10px; margin-bottom: 8px;
+}
+#${OVERLAY_ID} .wda-pf-item.skipped { opacity: 0.5; }
+#${OVERLAY_ID} .wda-pf-label {
+  font-weight: 600; color: #e2e8f0; font-size: 12px;
+}
+#${OVERLAY_ID} .wda-pf-meta {
+  color: #94a3b8; font-size: 11px; margin: 2px 0 6px;
+}
+#${OVERLAY_ID} .wda-pf-input {
+  width: 100%; box-sizing: border-box; background: #020617;
+  color: #e2e8f0; border: 1px solid #1e293b; border-radius: 6px;
+  padding: 6px 8px; font-size: 12px; font-family: inherit;
+  margin: 4px 0 6px;
+}
+#${OVERLAY_ID} .wda-pf-input:focus {
+  outline: none; border-color: #4f46e5;
+}
+#${OVERLAY_ID} .wda-pf-actions {
+  display: flex; gap: 6px;
+}
+#${OVERLAY_ID} .wda-pf-actions button {
+  flex: 1; padding: 5px 8px; border-radius: 6px; border: 0;
+  font-size: 11px; font-weight: 600; cursor: pointer;
+}
+#${OVERLAY_ID} .wda-pf-approve { background: #064e3b; color: #6ee7b7; }
+#${OVERLAY_ID} .wda-pf-skip    { background: #1e293b; color: #94a3b8; }
+#${OVERLAY_ID} .wda-pf-actions button:hover { filter: brightness(1.2); }
+#${OVERLAY_ID} .wda-pf-foot {
+  display: flex; gap: 8px; padding-top: 4px;
+  border-top: 1px solid #1e293b; margin-top: 4px;
+}
+#${OVERLAY_ID} .wda-pf-foot button {
+  flex: 1; padding: 7px 10px; border-radius: 8px; border: 0;
+  font-size: 12px; font-weight: 600; cursor: pointer;
+}
+#${OVERLAY_ID} .wda-pf-fill   { background: #22c55e; color: #052e10; }
+#${OVERLAY_ID} .wda-pf-skipall { background: #1e293b; color: #e2e8f0; }
 `;
 
-export function mountOverlay(): OverlayHandle {
+export function mountOverlay(opts?: MountOverlayOptions): OverlayHandle {
   if (!document.getElementById(STYLE_ID)) {
     const style = document.createElement("style");
     style.id = STYLE_ID;
@@ -118,12 +191,27 @@ export function mountOverlay(): OverlayHandle {
   root.innerHTML = `
     <div class="wda-h">
       <span>Workday Autofill</span>
-      <button class="wda-close" aria-label="Close">x</button>
+      <div class="wda-h-actions">
+        <button type="button" class="wda-stop">Stop</button>
+        <button type="button" class="wda-close" aria-label="Stop and close">×</button>
+      </div>
     </div>
     <div class="wda-body">
       <div class="wda-status">Idle.</div>
       <div class="wda-progress"><div></div></div>
       <div class="wda-log" hidden></div>
+      <div class="wda-prefill">
+        <h3>Review uncertain fields</h3>
+        <div class="wda-sub">
+          The AI was not confident on these. Approve, edit, or skip each one
+          before they're typed into the form.
+        </div>
+        <div class="wda-pf-list"></div>
+        <div class="wda-pf-foot">
+          <button type="button" class="wda-pf-skipall">Skip all</button>
+          <button type="button" class="wda-pf-fill">Fill approved</button>
+        </div>
+      </div>
       <div class="wda-review">
         <h3>Review your answers</h3>
         <div class="wda-review-list"></div>
@@ -144,10 +232,19 @@ export function mountOverlay(): OverlayHandle {
   const reviewList = $<HTMLElement>(".wda-review-list");
   const actions = $<HTMLElement>(".wda-actions");
   const closeBtn = $<HTMLButtonElement>(".wda-close");
+  const stopBtn = $<HTMLButtonElement>(".wda-stop");
+  const prefillBox = $<HTMLElement>(".wda-prefill");
+  const prefillList = $<HTMLElement>(".wda-pf-list");
+  const prefillFill = $<HTMLButtonElement>(".wda-pf-fill");
+  const prefillSkipAll = $<HTMLButtonElement>(".wda-pf-skipall");
 
-  closeBtn.addEventListener("click", () => {
-    root.style.display = "none";
-  });
+  function requestStop() {
+    opts?.onUserStop?.();
+    statusEl.textContent = "Stopping… (will exit after this step)";
+  }
+
+  stopBtn.addEventListener("click", requestStop);
+  closeBtn.addEventListener("click", requestStop);
 
   return {
     setStatus(t) {
@@ -192,10 +289,130 @@ export function mountOverlay(): OverlayHandle {
       confirm.onclick = () => { handlers.onConfirm(); };
       cancel.onclick  = () => { handlers.onCancel();  };
     },
+    reviewBeforeFill(items) {
+      return new Promise<MappedValue[]>((resolve) => {
+        if (items.length === 0) {
+          resolve([]);
+          return;
+        }
+        // Hide the after-fill review while this pre-fill panel is up.
+        reviewBox.style.display = "none";
+        actions.hidden = true;
+        prefillBox.style.display = "block";
+        prefillList.innerHTML = "";
+
+        // Local state: id -> { value, skipped }
+        const state = new Map<
+          string,
+          { value: string; skipped: boolean; original: MappedValue }
+        >();
+
+        for (const it of items) {
+          const initialVal = answerToInputString(it.answer.value);
+          state.set(it.field.id, {
+            value: initialVal,
+            skipped: false,
+            original: it.answer,
+          });
+
+          const row = document.createElement("div");
+          row.className = "wda-pf-item";
+          row.dataset.id = it.field.id;
+
+          const conf = Math.round((it.answer.confidence ?? 0) * 100);
+          const reasonHtml = it.answer.reason
+            ? `<div class="wda-pf-meta">${escape(it.answer.reason)}</div>`
+            : "";
+          const sectionHtml = it.field.section
+            ? `<span class="wda-pill skip">${escape(it.field.section)}</span>`
+            : "";
+          row.innerHTML = `
+            <div class="wda-pf-label">
+              ${escape(it.field.label || "(unlabeled)")}
+              <span class="wda-pill warn">${conf}% confidence</span>
+              ${sectionHtml}
+            </div>
+            ${reasonHtml}
+            <input type="text" class="wda-pf-input" placeholder="Enter value to fill (leave empty to skip)" />
+            <div class="wda-pf-actions">
+              <button type="button" class="wda-pf-approve">Approve</button>
+              <button type="button" class="wda-pf-skip">Skip</button>
+            </div>
+          `;
+          const input = row.querySelector<HTMLInputElement>(".wda-pf-input")!;
+          input.value = initialVal;
+          input.addEventListener("input", () => {
+            const s = state.get(it.field.id)!;
+            s.value = input.value;
+            s.skipped = false;
+            row.classList.remove("skipped");
+          });
+          row.querySelector<HTMLButtonElement>(".wda-pf-approve")!.addEventListener(
+            "click",
+            () => {
+              const s = state.get(it.field.id)!;
+              s.skipped = false;
+              row.classList.remove("skipped");
+              input.focus();
+            },
+          );
+          row.querySelector<HTMLButtonElement>(".wda-pf-skip")!.addEventListener(
+            "click",
+            () => {
+              const s = state.get(it.field.id)!;
+              s.skipped = true;
+              row.classList.add("skipped");
+            },
+          );
+          prefillList.appendChild(row);
+        }
+
+        function done() {
+          const out: MappedValue[] = [];
+          for (const [id, s] of state) {
+            if (s.skipped || s.value.trim() === "") {
+              out.push({
+                id,
+                value: null,
+                confidence: 0,
+                reason: "Skipped by user during review",
+                needsReview: true,
+              });
+            } else {
+              out.push({
+                id,
+                value: s.value,
+                confidence: 1,
+                reason: "Approved by user during review",
+              });
+            }
+          }
+          prefillBox.style.display = "none";
+          prefillList.innerHTML = "";
+          resolve(out);
+        }
+
+        prefillFill.onclick = done;
+        prefillSkipAll.onclick = () => {
+          for (const s of state.values()) s.skipped = true;
+          prefillList.querySelectorAll(".wda-pf-item").forEach((r) =>
+            r.classList.add("skipped"),
+          );
+          done();
+        };
+      });
+    },
     destroy() {
       root.remove();
     },
   };
+}
+
+function answerToInputString(v: string | string[] | boolean | null): string {
+  if (v == null) return "";
+  if (typeof v === "boolean") return v ? "Yes" : "No";
+  if (Array.isArray(v)) return v.join(", ");
+  return String(v);
 }
 
 function renderValue(v: string | string[] | boolean | null): string {

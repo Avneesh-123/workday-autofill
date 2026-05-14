@@ -65,7 +65,7 @@ Strict rules:
 - One entry per input field. Never invent extra ids.
 - "value":
     * For "text" / "email" / "tel" / "url" / "textarea" / "date" / "number": a STRING.
-    * For "select" / "radio": a STRING equal to one of options[].value (or options[].label if value is empty).
+    * For "select" / "radio" / "combobox": a STRING equal to one of options[].value (or options[].label if value is empty). If options[] is present, the string MUST be one of those exact labels/values (do not invent a free-text channel name that is not listed).
     * For "multiselect" / "checkbox group": an ARRAY of strings matching options.
     * For single "checkbox" (yes/no): a BOOLEAN.
     * For "file": null (file uploads are handled separately by the extension).
@@ -78,9 +78,28 @@ Strict rules:
     "Mobile" / "Phone Number" / "Telephone"  -> contact.phone
     "Email Address" / "E-mail"               -> contact.email
     "How did you hear about us?"             -> demographics.howDidYouHear (or "LinkedIn" if unknown)
+    "Phone Device Type" / "Device Type"     -> demographics.phoneDeviceType or "Mobile" — NEVER put the phone number in this field.
+    "Phone Number" / "Mobile Number"       -> contact.phone in international format (+countrycode...) when possible; use demographics.phoneFormatted if set.
     "Are you legally authorized to work..."  -> demographics.authorizedToWork (default Yes if unspecified for the country shown)
     "Do you require sponsorship..."          -> demographics.requiresSponsorship (default No if unspecified)
+    "Are you currently ... contractor / vendor / temporary worker" for THIS employer -> demographics.currentlyContractorAtEmployer (default false -> answer "No" unless the resume clearly states they are a current contractor there)
 - For free-text "Why do you want to work here" or cover-letter style questions,
   write a concise, professional 2-4 sentence answer using the profile context.
 - Never include explanations OUTSIDE the JSON.
+`.trim();
+
+export const FIELD_MAPPING_VISION_HINT = `
+Additional context: the attached image is a screenshot of the visible form.
+Use it to understand spatial layout that the raw JSON cannot convey:
+- Repeated rows (e.g. multiple "Job Title" inputs stacked under "Work Experience"
+  or "Education"). Use the visible row order to match a field with the correct
+  profile.experience[repeatIndex] / profile.education[repeatIndex] entry.
+- Fields whose label is empty or icon-only — read the placeholder, the nearest
+  heading, or the column header from the image.
+- Section headings ("Work Experience", "Education", "Languages", etc.) that
+  group nearby fields.
+- Dropdown options visible in popup menus.
+Trust the JSON for the field's "id" and "kind"; use the image to resolve
+ambiguous semantics. If the screenshot does not contain the field (e.g.
+because it's below the fold), fall back to the JSON metadata.
 `.trim();

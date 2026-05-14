@@ -37,8 +37,30 @@ async function handle(msg: RuntimeMessage, sender: chrome.runtime.MessageSender)
         profile: msg.profile,
         settings,
         stepName: msg.stepName,
+        screenshot: msg.screenshot,
       });
       return { answers };
+    }
+
+    case "CAPTURE_SCREENSHOT": {
+      // Capture only the *visible* viewport of the calling tab. Cropping /
+      // resizing happens client-side in the content script before we send
+      // the image to OpenAI so we never blow past their 20 MB request limit.
+      const tabId = sender.tab?.id;
+      const tab = tabId ? await chrome.tabs.get(tabId) : undefined;
+      if (!tab?.windowId) {
+        return { dataUrl: undefined as string | undefined };
+      }
+      try {
+        const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
+          format: "jpeg",
+          quality: 70,
+        });
+        return { dataUrl };
+      } catch (err) {
+        console.warn("[wda:bg] captureVisibleTab failed", err);
+        return { dataUrl: undefined as string | undefined };
+      }
     }
 
     case "GET_PROFILE":
